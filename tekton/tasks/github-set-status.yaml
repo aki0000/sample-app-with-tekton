@@ -1,0 +1,88 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: github-set-status
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Set GitHub commit status for PR Checks via REST API
+  params:
+    - name: REPO_FULL_NAME
+      type: string
+      description: "GitHub repository full name (owner/repo)"
+    - name: SHA
+      type: string
+      description: Commit SHA to attach the status to
+    - name: STATE
+      type: string
+      description: pending, success, failure, or error
+    - name: DESCRIPTION
+      type: string
+      default: ""
+    - name: CONTEXT
+      type: string
+      default: tekton/sample-app-ci
+      description: Status context shown in GitHub Checks
+    - name: TARGET_URL
+      type: string
+      default: ""
+      description: Link from GitHub to PipelineRun logs (optional)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      type: string
+      default: github-api-token
+    - name: GITHUB_TOKEN_SECRET_KEY
+      type: string
+      default: token
+    - name: CURL_IMAGE
+      type: string
+      default: docker.io/curlimages/curl:8.12.1
+  volumes:
+    - name: githubtoken
+      secret:
+        secretName: $(params.GITHUB_TOKEN_SECRET_NAME)
+  steps:
+    - name: set-status
+      image: $(params.CURL_IMAGE)
+      volumeMounts:
+        - name: githubtoken
+          mountPath: /etc/github-token
+          readOnly: true
+      env:
+        - name: REPO_FULL_NAME
+          value: $(params.REPO_FULL_NAME)
+        - name: SHA
+          value: $(params.SHA)
+        - name: STATE
+          value: $(params.STATE)
+        - name: DESCRIPTION
+          value: $(params.DESCRIPTION)
+        - name: CONTEXT
+          value: $(params.CONTEXT)
+        - name: TARGET_URL
+          value: $(params.TARGET_URL)
+        - name: TOKEN_KEY
+          value: $(params.GITHUB_TOKEN_SECRET_KEY)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        TOKEN="$(tr -d '\n' < "/etc/github-token/${TOKEN_KEY}")"
+        payload='{"state":"'"${STATE}"'","description":"'"${DESCRIPTION}"'","context":"'"${CONTEXT}"'"}'
+        case "${TARGET_URL}" in
+          http://*|https://*)
+            payload="${payload%\}},\"target_url\":\"${TARGET_URL}\"}"
+            ;;
+        esac
+        echo "POST /repos/${REPO_FULL_NAME}/statuses/${SHA} state=${STATE}"
+        http_code="$(curl -sS -o /tmp/gh-resp -w '%{http_code}' \
+          -X POST \
+          -H "Authorization: Bearer ${TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          -H "Content-Type: application/json" \
+          -d "${payload}" \
+          "https://api.github.com/repos/${REPO_FULL_NAME}/statuses/${SHA}")"
+        cat /tmp/gh-resp
+        echo
+        case "${http_code}" in
+          2*) echo "GitHub status ${STATE} set on ${REPO_FULL_NAME}#${SHA}" ;;
+          *) echo "GitHub API error HTTP ${http_code}" >&2; exit 1 ;;
+        esac

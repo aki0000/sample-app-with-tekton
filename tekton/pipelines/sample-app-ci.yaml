@@ -43,6 +43,22 @@ spec:
     - name: image-format
       type: string
       default: oci
+    - name: github-commit-sha
+      type: string
+      default: ""
+      description: PR head commit SHA; when set, report status to GitHub
+    - name: github-repo-full-name
+      type: string
+      default: ""
+      description: GitHub repository full name (owner/repo)
+    - name: github-status-context
+      type: string
+      default: tekton/sample-app-ci
+      description: Context label for GitHub commit status
+    - name: openshift-console-url
+      type: string
+      default: ""
+      description: OpenShift console base URL for target_url link (optional)
   workspaces:
     - name: shared-source
       description: Cloned repository and build artifacts (WAR, etc.)
@@ -50,7 +66,30 @@ spec:
       description: Registry push credentials (optional)
       optional: true
   tasks:
+    - name: github-status-pending
+      when:
+        - input: $(params.github-commit-sha)
+          operator: notin
+          values: [""]
+      taskRef:
+        name: github-set-status
+      params:
+        - name: REPO_FULL_NAME
+          value: $(params.github-repo-full-name)
+        - name: SHA
+          value: $(params.github-commit-sha)
+        - name: STATE
+          value: pending
+        - name: DESCRIPTION
+          value: Tekton CI running
+        - name: CONTEXT
+          value: $(params.github-status-context)
+        - name: TARGET_URL
+          value: $(params.openshift-console-url)/k8s/ns/$(context.pipelineRun.namespace)/tekton.dev~v1~PipelineRun/$(context.pipelineRun.name)
+
     - name: fetch-repository
+      runAfter:
+        - github-status-pending
       taskRef:
         name: git-clone
       params:
@@ -140,3 +179,52 @@ spec:
           value: $(params.image)
         - name: SCAN_IMAGE
           value: $(params.scan-image)
+
+  finally:
+    - name: github-status-success
+      when:
+        - input: $(tasks.status)
+          operator: in
+          values: ["Succeeded"]
+        - input: $(params.github-commit-sha)
+          operator: notin
+          values: [""]
+      taskRef:
+        name: github-set-status
+      params:
+        - name: REPO_FULL_NAME
+          value: $(params.github-repo-full-name)
+        - name: SHA
+          value: $(params.github-commit-sha)
+        - name: STATE
+          value: success
+        - name: DESCRIPTION
+          value: All CI steps succeeded
+        - name: CONTEXT
+          value: $(params.github-status-context)
+        - name: TARGET_URL
+          value: $(params.openshift-console-url)/k8s/ns/$(context.pipelineRun.namespace)/tekton.dev~v1~PipelineRun/$(context.pipelineRun.name)
+
+    - name: github-status-failure
+      when:
+        - input: $(tasks.status)
+          operator: in
+          values: ["Failed"]
+        - input: $(params.github-commit-sha)
+          operator: notin
+          values: [""]
+      taskRef:
+        name: github-set-status
+      params:
+        - name: REPO_FULL_NAME
+          value: $(params.github-repo-full-name)
+        - name: SHA
+          value: $(params.github-commit-sha)
+        - name: STATE
+          value: failure
+        - name: DESCRIPTION
+          value: Tekton CI failed
+        - name: CONTEXT
+          value: $(params.github-status-context)
+        - name: TARGET_URL
+          value: $(params.openshift-console-url)/k8s/ns/$(context.pipelineRun.namespace)/tekton.dev~v1~PipelineRun/$(context.pipelineRun.name)

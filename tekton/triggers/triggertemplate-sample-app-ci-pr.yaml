@@ -11,8 +11,12 @@ spec:
     - name: git-branch
     - name: pr-number
     - name: git-short-sha
+    - name: github-repo-full-name
     - name: image-registry
       default: quay.io/akhino/sample-tomcat
+    - name: openshift-console-url
+      default: ""
+      description: OpenShift console base URL (optional, for GitHub status target_url)
   resourcetemplates:
     - apiVersion: tekton.dev/v1
       kind: PipelineRun
@@ -33,6 +37,12 @@ spec:
             value: $(tt.params.git-url)
           - name: git-revision
             value: $(tt.params.git-revision)
+          - name: github-commit-sha
+            value: $(tt.params.git-revision)
+          - name: github-repo-full-name
+            value: $(tt.params.github-repo-full-name)
+          - name: openshift-console-url
+            value: $(tt.params.openshift-console-url)
           - name: image
             value: $(tt.params.image-registry):pr-$(tt.params.pr-number)-$(tt.params.git-short-sha)
           - name: tls-verify

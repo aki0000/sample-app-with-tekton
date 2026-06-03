@@ -5,30 +5,32 @@ metadata:
   labels:
     app.kubernetes.io/part-of: sample-app-ci
 ---
+# github / cel の ClusterInterceptor 参照に必須（503 の典型原因）
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRoleBinding
 metadata:
-  name: triggers-eventlistener
-  labels:
-    app.kubernetes.io/part-of: sample-app-ci
-rules:
-  - apiGroups: ["triggers.tekton.dev"]
-    resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers", "interceptors"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["tekton.dev"]
-    resources: ["pipelineruns", "pipelineruns/status"]
-    verbs: ["create", "get", "list", "watch", "patch", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: triggers-eventlistener
+  name: sample-app-ci-triggers-eventlistener-clusterroles
   labels:
     app.kubernetes.io/part-of: sample-app-ci
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: triggers-eventlistener
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-clusterroles
+subjects:
+  - kind: ServiceAccount
+    name: triggers-eventlistener
+    namespace: sample-tomcat
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: triggers-eventlistener-tekton-roles
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-roles
 subjects:
   - kind: ServiceAccount
     name: triggers-eventlistener
