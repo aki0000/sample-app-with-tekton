@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: el-sample-app-ci-github-pr
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  to:
+    kind: Service
+    name: el-sample-app-ci-github-pr
+    weight: 100
+  port:
+    targetPort: http-listener
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

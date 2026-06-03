@@ -15,9 +15,16 @@ OpenShift 上で **Tekton** が CI（ソース取得 → コードビルド → 
 ```
 tekton/
 ├── tasks/           # git-clone, code-build, unit-test, static-scan, image-build, image-scan
-├── pipelines/     # sample-app-ci
-├── pipelineruns/  # 手動起動例
-└── rbac/          # ServiceAccount pipeline
+├── pipelines/       # sample-app-ci
+├── pipelineruns/    # 手動起動例
+├── triggers/        # GitHub PR 用 EventListener / Binding / Template / Route
+└── rbac/
+    ├── pipeline-sa.yaml              # SA pipeline（clone / maven / scan）
+    ├── pipeline-scc-pipelines.yaml   # pipelines-scc → pipeline
+    ├── pipelines-sa-build.yaml       # SA pipelines-sa-build（image-build）
+    ├── pipeline-scc-buildah-1000.yaml   # SCC 利用権 → pipelines-sa-build
+    ├── scc-pipelines-buildah-1000.yaml  # SCC 定義（クラスタ管理者が適用）
+    └── triggers-eventlistener.yaml   # EventListener 用 SA / Role
 ```
 
 ### 適用順
@@ -36,24 +43,76 @@ oc apply -f tekton/pipelines/
 # クラスタ管理者が一度だけ適用（非 root Buildah 用 SCC / ClusterRole）
 oc apply -f tekton/rbac/scc-pipelines-buildah-1000.yaml
 
-# 不要なら削除（デフォルト pipeline SA の anyuid と競合しうる）
-# oc delete rolebinding pipeline-anyuid pipeline-privileged -n "$NS" --ignore-not-found
+# 過去に anyuid / privileged を付けていた場合は削除（競合防止）
+oc delete rolebinding pipeline-anyuid pipeline-privileged pipeline-tekton-buildah -n "$NS" --ignore-not-found
 
 # PipelineRun の git-url / image を編集してから
 oc create -f tekton/pipelineruns/sample-app-ci-run.yaml
 ```
 
-`image-build` は [Red Hat ドキュメント（非 root Buildah）](https://docs.redhat.com/ja/documentation/red_hat_openshift_pipelines/1.13/html/securing_openshift_pipelines/unprivileged-building-of-container-images-using-buildah) に沿い、**UID 1000（build ユーザー）**・専用 SA `pipelines-sa-build`・SCC `pipelines-scc-buildah-1000` で Tekton 内の buildah を実行します。`capabilities.add` は使わず、`allowPrivilegeEscalation: true` で SETUID/SETGID を有効にします。
+### GitHub PR トリガー（`feature/*` ブランチ）
 
-Quay へ push する場合:
+`feature/xxxx` ブランチから PR が **opened / synchronize / reopened** されたときに CI を自動起動します。PR の head commit を clone し、イメージタグは `pr-<番号>-<短いSHA>`（例: `quay.io/akhino/sample-tomcat:pr-42-a1b2c3d`）です。
+
+**前提**: Tekton Triggers が有効（OpenShift Pipelines 標準）。`ClusterInterceptor` `github` / `cel` が利用可能であること（`oc get clusterinterceptors`）。
 
 ```bash
+export NS=your-namespace
+oc project "$NS"
+
+# 1. 既存 Task / Pipeline / RBAC を適用済みであること（上記「適用順」参照）
+
+# 2. Webhook 署名検証用 Secret（GitHub Webhook 設定と同じ文字列）
+WEBHOOK_SECRET='your-random-secret-string'
+oc create secret generic github-webhook-secret \
+  --from-literal=secretToken="$WEBHOOK_SECRET" \
+  -n "$NS"
+
+# 3. Triggers リソース
+oc apply -f tekton/rbac/triggers-eventlistener.yaml
+oc apply -f tekton/triggers/
+
+# 4. EventListener Pod が Ready になるまで待つ
+oc wait --for=condition=Available deployment/el-sample-app-ci-github-pr -n "$NS" --timeout=120s
+
+# 5. GitHub から到達できる URL を確認
+EL_URL="https://$(oc get route el-sample-app-ci-github-pr -n "$NS" -o jsonpath='{.spec.host}')"
+echo "$EL_URL"
+```
+
+**GitHub リポジトリ設定**（Settings → Webhooks → Add webhook）:
+
+| 項目 | 値 |
+|------|-----|
+| Payload URL | 上記 `EL_URL` |
+| Content type | `application/json` |
+| Secret | `WEBHOOK_SECRET` と同じ値 |
+| Events | **Pull requests** のみ |
+
+PR 作成後の確認:
+
+```bash
+tkn pipelinerun list -n "$NS" -l tekton.dev/trigger=github-pr-feature
+tkn pipelinerun logs -f -n "$NS" -l tekton.dev/trigger=github-pr-feature
+```
+
+プッシュ先レジストリを変える場合は `tekton/triggers/eventlistener-github-pr.yaml` の `image-registry` パラメータを編集してください。
+
+`image-build` は [Red Hat ドキュメント（非 root Buildah）](https://docs.redhat.com/ja/documentation/red_hat_openshift_pipelines/1.13/html/securing_openshift_pipelines/unprivileged-building-of-container-images-using-buildah) に沿い、**UID 1000（build ユーザー）**・専用 SA `pipelines-sa-build`・SCC `pipelines-scc-buildah-1000` で Tekton 内の buildah を実行します。`capabilities.add` は使わず、`allowPrivilegeEscalation: true` で SETUID/SETGID を有効にします。
+
+Quay へ push する場合（`unauthorized` はほぼ認証未設定）:
+
+```bash
+# Quay.io → Account Settings → Robot Account 等でトークン発行
+# ロボットの場合: ユーザー名は org+robot 形式（例: akhino+ci-push）
 oc create secret docker-registry quay-push-secret \
   --docker-server=quay.io \
-  --docker-username=YOUR_USER \
-  --docker-password=YOUR_TOKEN \
+  --docker-username='akhino+ROBOT_NAME' \
+  --docker-password='YOUR_QUAY_TOKEN' \
   -n "$NS"
-# PipelineRun の docker-credentials コメントを外す
+
+# リポジトリ akhino/sample-tomcat への push 権限をロボットに付与すること
+oc apply -f tekton/pipelineruns/sample-app-ci-run.yaml  # docker-credentials 有効済み
 ```
 
 ### CI の見方
@@ -83,10 +142,12 @@ podman build -f ContainerFile -t sample-app:local .
 | UT 失敗 | `tkn taskrun logs <unit-test-run> -n "$NS"` で Surefire を確認 |
 | Maven 依存の取得失敗 | クラスタから Maven Central へ出られるか、プロキシ設定 |
 | `uid_map` / capabilities で Pod 拒否 | [RH 非 root Buildah](https://docs.redhat.com/ja/documentation/red_hat_openshift_pipelines/1.13/html/securing_openshift_pipelines/unprivileged-building-of-container-images-using-buildah) どおり `scc-pipelines-buildah-1000` + `pipelines-sa-build` を適用 |
-| イメージ push 失敗（Quay 等） | `quay-push-secret` を作成し PipelineRun の `docker-credentials` を有効化 |
+| Quay push `unauthorized` | `quay-push-secret` を作成（`--docker-server=quay.io`）。ロボットに `akhino/sample-tomcat` への write 権限。PipelineRun の `docker-credentials` が有効か確認 |
 | `short-name resolution ... cannot prompt without a TTY` | `FROM` を `docker.io/library/...` の完全修飾名に（`ContainerFile` 参照）。Task 再適用後に git 取得からやり直す |
 | `fetch-repository` の ImagePullBackOff | `registry.redhat.io` は未認証だと pull 不可。既定は `docker.io/alpine/git`。**Task をクラスタに再適用**してから PipelineRun を再作成（`oc apply -f tekton/tasks/`） |
 | docker.io が禁止のクラスタ | Pipeline / PipelineRun の `git-image`・`maven-image` を社内ミラー URL に変更 |
+| PR トリガーで PipelineRun が作られない | GitHub Webhook の Recent Deliveries で HTTP 202/200 を確認。`feature/` 以外のブランチは CEL で除外。`oc logs deploy/el-sample-app-ci-github-pr -n "$NS"` |
+| Webhook `401` / `403` | `github-webhook-secret` の `secretToken` が GitHub Webhook Secret と一致するか |
 
 ---
 

@@ -25,15 +25,18 @@ spec:
           resources:
             requests:
               storage: 1Gi
-    # Quay push: Secret 作成後にコメントを外す
+    # Quay push 必須（未作成だと push で unauthorized）:
     # oc create secret docker-registry quay-push-secret \
-    #   --docker-server=quay.io --docker-username=USER --docker-password=TOKEN -n "$NS"
-    # - name: docker-credentials
-    #   secret:
-    #     secretName: quay-push-secret
-    #     items:
-    #       - key: .dockerconfigjson
-    #         path: .dockerconfigjson
+    #   --docker-server=quay.io \
+    #   --docker-username='akhino+robotname' \
+    #   --docker-password='<quay-token>' \
+    #   -n "$NS"
+    - name: docker-credentials
+      secret:
+        secretName: quay-push-secret
+        items:
+          - key: .dockerconfigjson
+            path: .dockerconfigjson
   taskRunTemplate:
     serviceAccountName: pipeline
   taskRunSpecs:

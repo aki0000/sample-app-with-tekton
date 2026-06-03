@@ -63,6 +63,9 @@ spec:
         if [ -d "$(workspaces.dockerconfig.path)" ] && \
            [ -f "$(workspaces.dockerconfig.path)/.dockerconfigjson" ]; then
           cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" /home/build/.docker/config.json
+        elif [ "$(params.SKIP_PUSH)" != "true" ]; then
+          echo "ERROR: push requires docker-credentials workspace (Quay: quay-push-secret)" >&2
+          exit 1
         fi
         buildah --storage-driver="$(params.STORAGE_DRIVER)" bud \
           --format="$(params.FORMAT)" \

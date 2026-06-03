@@ -1,0 +1,38 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: sample-app-ci-github-pr
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  serviceAccountName: triggers-eventlistener
+  triggers:
+    - name: feature-branch-pr
+      interceptors:
+        - ref:
+            name: github
+            kind: ClusterInterceptor
+          params:
+            - name: secretRef
+              value:
+                secretName: github-webhook-secret
+                secretKey: secretToken
+            - name: eventTypes
+              value:
+                - pull_request
+        - ref:
+            name: cel
+            kind: ClusterInterceptor
+          params:
+            - name: filter
+              value: >-
+                body.action in ['opened', 'synchronize', 'reopened'] &&
+                body.pull_request.head.ref.startsWith('feature/')
+            - name: overlays
+              value:
+                - key: short_sha
+                  expression: body.pull_request.head.sha.substring(0, 7)
+      bindings:
+        - ref: github-pr-binding
+      template:
+        ref: sample-app-ci-pr

@@ -1,0 +1,59 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: sample-app-ci-pr
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  params:
+    - name: git-url
+    - name: git-revision
+    - name: git-branch
+    - name: pr-number
+    - name: git-short-sha
+    - name: image-registry
+      default: quay.io/akhino/sample-tomcat
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: sample-app-ci-pr-
+        labels:
+          app.kubernetes.io/part-of: sample-app-ci
+          app.kubernetes.io/managed-by: tekton-triggers
+          tekton.dev/trigger: github-pr-feature
+        annotations:
+          tekton.dev/git-branch: $(tt.params.git-branch)
+          tekton.dev/pr-number: $(tt.params.pr-number)
+      spec:
+        pipelineRef:
+          name: sample-app-ci
+        params:
+          - name: git-url
+            value: $(tt.params.git-url)
+          - name: git-revision
+            value: $(tt.params.git-revision)
+          - name: image
+            value: $(tt.params.image-registry):pr-$(tt.params.pr-number)-$(tt.params.git-short-sha)
+          - name: tls-verify
+            value: "false"
+        workspaces:
+          - name: shared-source
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: docker-credentials
+            secret:
+              secretName: quay-push-secret
+              items:
+                - key: .dockerconfigjson
+                  path: .dockerconfigjson
+        taskRunTemplate:
+          serviceAccountName: pipeline
+        taskRunSpecs:
+          - pipelineTaskName: image-build
+            serviceAccountName: pipelines-sa-build
