@@ -16,3 +16,5 @@ spec:
       value: $(body.number)
     - name: git-short-sha
       value: $(extensions.short_sha)
+    - name: github-repo-full-name
+      value: $(body.repository.full_name)
