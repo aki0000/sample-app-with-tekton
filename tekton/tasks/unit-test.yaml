@@ -1,0 +1,25 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: unit-test
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Maven unit tests (fails the pipeline on test failure)
+  params:
+    - name: MAVEN_IMAGE
+      type: string
+      default: docker.io/library/maven:3.9.9-eclipse-temurin-8
+    - name: CONTEXT_DIR
+      type: string
+      default: "."
+  workspaces:
+    - name: source
+  steps:
+    - name: mvn-test
+      image: $(params.MAVEN_IMAGE)
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+        mvn -B test

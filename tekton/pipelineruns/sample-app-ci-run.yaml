@@ -1,0 +1,36 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: sample-app-ci-
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  pipelineRef:
+    name: sample-app-ci
+  params:
+    - name: git-url
+      value: https://github.com/YOUR_ORG/sample-app-with-tekton.git
+    - name: git-revision
+      value: main
+    - name: image
+      value: image-registry.openshift-image-registry.svc:5000/YOUR_NAMESPACE/sample-app:latest
+    - name: tls-verify
+      value: "false"
+  workspaces:
+    - name: shared-source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    # Optional: bind registry push secret
+    # - name: docker-credentials
+    #   secret:
+    #     secretName: pipeline-push-secret
+    #     items:
+    #       - key: .dockerconfigjson
+    #         path: .dockerconfigjson
+  taskRunTemplate:
+    serviceAccountName: pipeline

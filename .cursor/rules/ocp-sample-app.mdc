@@ -1,0 +1,109 @@
+---
+description: sample-app を Tekton で CI 実行する OCP デモ（Pipeline / デプロイ）
+alwaysApply: true
+---
+
+# sample-app + Tekton CI デモ
+
+このリポジトリの目的は、**sample-app**（Java / Tomcat の WAR）を題材に、OpenShift 上で **Tekton パイプラインが CI を実行する様子を見える化する**ことである。OCP への手動デプロイ手順の教材ではない。
+
+## デモで見せたいこと
+
+| 観点 | 内容 |
+|------|------|
+| **CI** | 下記 **5 ステップ**を順に実行する Tekton Pipeline（各ステップが TaskRun として見える） |
+| **可視性** | `PipelineRun` / TaskRun のログ、`tkn` / `oc` で進捗と結果を追える |
+| **アプリ** | コードビルド・UT の成果物と、イメージビルド後の `ContainerFile`（Tomcat + `sample.war`）が一致している |
+
+デプロイ（Deployment / Service / Route）は **パイプラインの後段または別ステップ**として扱ってよいが、リポジトリの主役は Tekton CI である。
+
+## CI パイプライン（必須ステップ）
+
+ソース取得（`git-clone` 等）のあと、**この順序で**実行する。1 ステップ = 1 Task（または Pipeline の 1 `task`）を基本とする。
+
+| # | ステップ | 内容 | 実装の目安 |
+|---|----------|------|------------|
+| 1 | **コードビルド** | Maven でコンパイル・パッケージ | `mvn -B package -DskipTests` → `target/sample.war` |
+| 2 | **UT** | ユニットテスト | `mvn -B test`（失敗時はパイプラインを止める） |
+| 3 | **静的コードスキャン（dummy）** | 本番ツールは使わず通過を模す | ログ出力のみ、または固定メッセージで exit 0。後から Sonar 等に差し替え可能な Task 名・パラメータを残す |
+| 4 | **イメージビルド** | `ContainerFile` でランタイムイメージをビルド・プッシュ | buildah / kaniko 等。ビルドコンテキストに `target/sample.war` を含める |
+| 5 | **イメージスキャン（dummy）** | 本番スキャナは使わず通過を模す | イメージ参照をパラメータで受け取り、ログのみで exit 0。後から Trivy / Clair 等に差し替え可能 |
+
+- **dummy スキャン**はデモ用。外部 SaaS・スキャナ Pod・ライセンスは不要。Task 名は `static-scan` / `image-scan` など意図が分かるものにする。
+- ステップ 1 と 2 は **別 Task** に分け、TaskRun 一覧で「ビルド → テスト」と追えるようにする（1 Task に `mvn package` と `mvn test` をまとめない）。
+- 前段が失敗したら後段は実行しない（Pipeline の `runAfter` / デフォルトの逐次実行で十分）。
+
+## 想定ディレクトリ構成
+
+```
+sample-app-with-tekton/
+├── README.md                 # デモの全体像・前提・パイプラインの起動と確認
+├── pom.xml
+├── ContainerFile             # sample.war を載せるランタイムイメージ
+├── src/                      # sample-app 本体
+└── tekton/                   # Tekton 定義（メイン）
+    ├── tasks/                # 1 Task = 1 ファイル（例: build, unit-test, static-scan, image-build, image-scan）
+    ├── pipelines/            # 上記 5 ステップ + git-clone を束ねる Pipeline
+    └── pipelineruns/         # 手動デモ用の Run 例（任意）
+```
+
+OCP マニフェストを置く場合は `openshift/` に分離し、**Tekton 定義と混在させない**。
+
+## Tekton の方針
+
+- **Tekton Pipelines**（`tekton.dev/v1` またはクラスタの推奨 API）を使う
+- **1 ファイル = 1 リソース**（`---` での結合は避ける）
+- Pipeline は **CI 5 ステップ + ソース取得**のみ。デプロイ Task は CI デモの必須には含めない
+- 推奨 Task 構成（名前はプロジェクトで揃える）:
+  - `git-clone`（または `fetch-repository`）
+  - `code-build` — コードビルド
+  - `unit-test` — UT
+  - `static-scan` — 静的コードスキャン（dummy）
+  - `image-build` — イメージビルド・プッシュ
+  - `image-scan` — イメージスキャン（dummy）
+- **ワークスペース**（ソース共有）・**パラメータ**（リポジトリ URL、イメージ名・タグ、レジストリ push 先）を README と PipelineRun で明示する
+- トリガー（EventListener 等）は **デモに必要なときだけ**追加。まずは `PipelineRun` 手動起動で 5 ステップが順に見えることを優先する
+
+## sample-app（ビルド対象）の慣習
+
+- Maven: `artifactId` は `sample-app`、`finalName` は `sample`（WAR: `target/sample.war`）
+- **コードビルド**で WAR を生成し、**UT** で `src/test`（追加する場合）を実行する
+- `ContainerFile` は `target/sample.war` を Tomcat に配置する前提。**イメージビルド**はコードビルド完了後のワークスペースを参照する
+- パイプライン内の成果物パスと `ContainerFile` の `COPY` を一致させる
+
+## OCP デプロイ（副次）
+
+パイプライン後にクラスタへ載せる場合のみ、以下を守る。
+
+| リソース | 用途 |
+|----------|------|
+| **Deployment** | アプリ Pod |
+| **Service** | クラスタ内ルーティング |
+| **Route** | 外部公開（`route.openshift.io/v1`） |
+
+- Ingress / DeploymentConfig は使わない
+- 3 リソースで同じ `app` ラベルと名前（例: `sample-app`）を揃える
+- `replicas: 1` から始める
+- restricted SCC を意識した `securityContext`（非 root・特権昇格禁止など）を推奨
+
+## README に書くこと（Tekton デモ向け）
+
+1. 前提: OCP ログイン、Tekton のインストール確認、namespace / ServiceAccount
+2. Tekton リソースの適用順（Task → Pipeline → PipelineRun など）
+3. **CI の見方**:
+   - `tkn pipelinerun list` / `tkn pipelinerun logs -f`
+   - `oc get pipelinerun,taskrun` / `oc describe pipelinerun <name>`
+4. 成功条件: 5 ステップすべて Succeeded（dummy スキャン含む）、WAR 生成、イメージ push（任意のデプロイ確認は別節）
+5. 各 TaskRun の確認例（`tkn taskrun list`、失敗時は該当ステップのログ）
+6. よくある失敗（UT 失敗、Maven キャッシュ、レジストリ認証、SCC）の短いメモ
+
+## 実装時の禁止・注意
+
+- ❌ このリポジトリを「手動 `oc apply` だけの OCP 入門」に戻さない
+- ❌ Tekton なしで Helm / Operator / 巨大な GitOps 一式を主役にしない
+- ❌ 1 YAML に Pipeline + 複数 Task + Deployment をまとめない
+- ❌ デモの核心を隠す過度な抽象化（大量の Kustomize オーバーレイなど）
+- ❌ CI 5 ステップを省略する、または静的・イメージスキャンをいきなり本番ツール必須にする（dummy で可視化を優先）
+- ❌ コードビルドと UT を 1 Task にまとめて TaskRun が 1 本しか見えない構成にする
+- ✅ 変更は最小 diff。ログと `oc`/`tkn` で追えるパイプラインを優先する
+- ✅ 新規ファイルは `tekton/` 配下に置き、README に起動・確認手順を追記する

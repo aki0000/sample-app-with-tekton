@@ -1,0 +1,127 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: sample-app-ci
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: CI pipeline — git clone, code build, UT, static scan (dummy), image build, image scan (dummy)
+  params:
+    - name: git-url
+      type: string
+      description: Git repository URL
+    - name: git-revision
+      type: string
+      default: main
+    - name: image
+      type: string
+      description: Full image reference including tag (build and scan target)
+    - name: context-dir
+      type: string
+      default: "."
+      description: Project root inside the cloned repo
+    - name: maven-image
+      type: string
+      default: docker.io/library/maven:3.9.9-eclipse-temurin-8
+    - name: git-image
+      type: string
+      default: docker.io/alpine/git:2.47.2
+      description: Git clone step image (avoid registry.redhat.io without pull secrets)
+    - name: scan-image
+      type: string
+      default: docker.io/library/busybox:1.36.1
+      description: Dummy scan steps image
+    - name: tls-verify
+      type: string
+      default: "true"
+  workspaces:
+    - name: shared-source
+      description: Cloned repository and build artifacts (WAR, etc.)
+    - name: docker-credentials
+      description: Registry push credentials (optional)
+      optional: true
+  tasks:
+    - name: fetch-repository
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: GIT_IMAGE
+          value: $(params.git-image)
+      workspaces:
+        - name: output
+          workspace: shared-source
+
+    - name: code-build
+      runAfter:
+        - fetch-repository
+      taskRef:
+        name: code-build
+      params:
+        - name: MAVEN_IMAGE
+          value: $(params.maven-image)
+        - name: CONTEXT_DIR
+          value: $(params.context-dir)
+      workspaces:
+        - name: source
+          workspace: shared-source
+
+    - name: unit-test
+      runAfter:
+        - code-build
+      taskRef:
+        name: unit-test
+      params:
+        - name: MAVEN_IMAGE
+          value: $(params.maven-image)
+        - name: CONTEXT_DIR
+          value: $(params.context-dir)
+      workspaces:
+        - name: source
+          workspace: shared-source
+
+    - name: static-scan
+      runAfter:
+        - unit-test
+      taskRef:
+        name: static-scan
+      params:
+        - name: CONTEXT_DIR
+          value: $(params.context-dir)
+        - name: SCAN_IMAGE
+          value: $(params.scan-image)
+      workspaces:
+        - name: source
+          workspace: shared-source
+
+    - name: image-build
+      runAfter:
+        - static-scan
+      taskRef:
+        name: image-build
+      params:
+        - name: IMAGE
+          value: $(params.image)
+        - name: CONTEXT_DIR
+          value: $(params.context-dir)
+        - name: TLSVERIFY
+          value: $(params.tls-verify)
+      workspaces:
+        - name: source
+          workspace: shared-source
+        - name: dockerconfig
+          workspace: docker-credentials
+
+    - name: image-scan
+      runAfter:
+        - image-build
+      taskRef:
+        name: image-scan
+      params:
+        - name: IMAGE
+          value: $(params.image)
+        - name: SCAN_IMAGE
+          value: $(params.scan-image)

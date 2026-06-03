@@ -1,0 +1,28 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: code-build
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Maven compile and package (skip tests)
+  params:
+    - name: MAVEN_IMAGE
+      type: string
+      default: docker.io/library/maven:3.9.9-eclipse-temurin-8
+    - name: CONTEXT_DIR
+      type: string
+      default: "."
+      description: Directory containing pom.xml relative to the source workspace
+  workspaces:
+    - name: source
+      description: Repository with pom.xml
+  steps:
+    - name: mvn-package
+      image: $(params.MAVEN_IMAGE)
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+        mvn -B package -DskipTests
+        test -f target/sample.war

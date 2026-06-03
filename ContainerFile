@@ -1,0 +1,12 @@
+# ベースとするTomcat8, JDK8 のイメージ
+FROM tomcat:8.5.100-jre8-temurin-jammy
+
+# アプリケーション（War）のコピー
+COPY target/sample.war /usr/local/tomcat/webapps/
+COPY target/sample.war /usr/local/tomcat/webapps/ROOT.war
+
+# TLS 設定は ConfigMap / Secret をマウント（openshift/*.yaml）
+EXPOSE 8080 8443
+
+# Tomcat の起動
+CMD ["catalina.sh", "run"]

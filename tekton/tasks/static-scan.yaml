@@ -1,0 +1,31 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: static-scan
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Dummy static code scan (placeholder for SonarQube etc.)
+  params:
+    - name: SCANNER
+      type: string
+      default: dummy
+      description: Scanner identifier for future replacement
+    - name: CONTEXT_DIR
+      type: string
+      default: "."
+    - name: SCAN_IMAGE
+      type: string
+      default: docker.io/library/busybox:1.36.1
+  workspaces:
+    - name: source
+  steps:
+    - name: scan
+      image: $(params.SCAN_IMAGE)
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        echo "[static-scan] scanner=$(params.SCANNER) status=PASS (demo dummy)"
+        echo "[static-scan] context=$(workspaces.source.path)/$(params.CONTEXT_DIR)"
+        ls -la pom.xml target/sample.war 2>/dev/null || ls -la pom.xml

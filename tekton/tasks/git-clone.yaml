@@ -1,0 +1,42 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-clone
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Clone a Git repository into the source workspace
+  params:
+    - name: url
+      type: string
+      description: Git repository URL
+    - name: revision
+      type: string
+      default: main
+      description: Git revision (branch, tag, or commit)
+    - name: subdirectory
+      type: string
+      default: ""
+      description: Subdirectory inside the workspace (empty = workspace root)
+    - name: GIT_IMAGE
+      type: string
+      default: docker.io/alpine/git:2.47.2
+      description: Git client image (do not use registry.redhat.io without pull secrets)
+  workspaces:
+    - name: output
+      description: Clone destination
+  steps:
+    - name: clone
+      image: $(params.GIT_IMAGE)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        work="$(workspaces.output.path)"
+        if [ -n "$(params.subdirectory)" ]; then
+          work="${work}/$(params.subdirectory)"
+          mkdir -p "${work}"
+        fi
+        cd "${work}"
+        rm -rf ./* .git 2>/dev/null || true
+        git clone "$(params.url)" .
+        git checkout "$(params.revision)"

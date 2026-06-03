@@ -1,0 +1,56 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: image-build
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+spec:
+  description: Build and push container image with buildah (ContainerFile + sample.war)
+  params:
+    - name: IMAGE
+      type: string
+      description: Image reference to build and push (e.g. image-registry.openshift-image-registry.svc:5000/ns/sample-app:tag)
+    - name: DOCKERFILE
+      type: string
+      default: ContainerFile
+    - name: CONTEXT_DIR
+      type: string
+      default: "."
+    - name: TLSVERIFY
+      type: string
+      default: "true"
+    - name: BUILDAH_IMAGE
+      type: string
+      default: quay.io/buildah/stable:v1.39.0
+  workspaces:
+    - name: source
+    - name: dockerconfig
+      description: Optional .docker/config.json for registry auth
+      optional: true
+  steps:
+    - name: build-and-push
+      image: $(params.BUILDAH_IMAGE)
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+      securityContext:
+        runAsUser: 0
+      env:
+        - name: BUILDAH_FORMAT
+          value: docker
+        - name: STORAGE_DRIVER
+          value: vfs
+        - name: BUILDAH_ISOLATION
+          value: chroot
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+        if [ -f "$(workspaces.dockerconfig.path)/.dockerconfigjson" ]; then
+          mkdir -p /root/.docker
+          cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" /root/.docker/config.json
+        fi
+        test -f target/sample.war
+        buildah bud \
+          --tls-verify="$(params.TLSVERIFY)" \
+          -f "$(params.DOCKERFILE)" \
+          -t "$(params.IMAGE)" \
+          .
+        buildah push --tls-verify="$(params.TLSVERIFY)" "$(params.IMAGE)"
