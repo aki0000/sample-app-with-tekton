@@ -1,5 +1,5 @@
 # ベースとするTomcat8, JDK8 のイメージ
-FROM tomcat:8.5.100-jre8-temurin-jammy
+FROM docker.io/library/tomcat:8.5.100-jre8-temurin-jammy
 
 # アプリケーション（War）のコピー
 COPY target/sample.war /usr/local/tomcat/webapps/

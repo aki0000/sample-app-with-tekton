@@ -1,0 +1,14 @@
+# Optional. image-build は pipelines-sa-build + scc-pipelines-buildah-1000 を使用（RH 非 root Buildah 手順）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-anyuid
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: pipeline

@@ -1,0 +1,14 @@
+# OpenShift Pipelines: grant pipelines-scc to pipeline SA (rootless buildah/podman).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-pipelines-scc
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:pipelines-scc
+subjects:
+  - kind: ServiceAccount
+    name: pipeline

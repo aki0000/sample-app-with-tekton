@@ -9,11 +9,11 @@ spec:
     name: sample-app-ci
   params:
     - name: git-url
-      value: https://github.com/YOUR_ORG/sample-app-with-tekton.git
+      value: https://github.com/aki0000/sample-app-with-tekton.git
     - name: git-revision
       value: main
     - name: image
-      value: image-registry.openshift-image-registry.svc:5000/YOUR_NAMESPACE/sample-app:latest
+      value: quay.io/akhino/sample-tomcat:v4
     - name: tls-verify
       value: "false"
   workspaces:
@@ -25,12 +25,17 @@ spec:
           resources:
             requests:
               storage: 1Gi
-    # Optional: bind registry push secret
+    # Quay push: Secret 作成後にコメントを外す
+    # oc create secret docker-registry quay-push-secret \
+    #   --docker-server=quay.io --docker-username=USER --docker-password=TOKEN -n "$NS"
     # - name: docker-credentials
     #   secret:
-    #     secretName: pipeline-push-secret
+    #     secretName: quay-push-secret
     #     items:
     #       - key: .dockerconfigjson
     #         path: .dockerconfigjson
   taskRunTemplate:
     serviceAccountName: pipeline
+  taskRunSpecs:
+    - pipelineTaskName: image-build
+      serviceAccountName: pipelines-sa-build

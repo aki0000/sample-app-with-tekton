@@ -1,0 +1,7 @@
+# Buildah 用 SA（Red Hat ドキュメント: pipelines-sa-userid-1000 相当）
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipelines-sa-build
+  labels:
+    app.kubernetes.io/part-of: sample-app-ci

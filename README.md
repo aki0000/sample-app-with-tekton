@@ -27,29 +27,33 @@ export NS=your-namespace
 oc project "$NS"
 
 oc apply -f tekton/rbac/pipeline-sa.yaml
+oc apply -f tekton/rbac/pipelines-sa-build.yaml
+oc apply -f tekton/rbac/pipeline-scc-pipelines.yaml
+oc apply -f tekton/rbac/pipeline-scc-buildah-1000.yaml
 oc apply -f tekton/tasks/
 oc apply -f tekton/pipelines/
 
-# Task 定義を更新したあと、古い PipelineRun だけでは clone イメージは変わらない。再作成すること
+# クラスタ管理者が一度だけ適用（非 root Buildah 用 SCC / ClusterRole）
+oc apply -f tekton/rbac/scc-pipelines-buildah-1000.yaml
 
-# buildah 用: クラスタポリシーで anyuid が必要な場合あり（下記「よくある失敗」）
-# oc adm policy add-scc-to-user anyuid -z pipeline -n "$NS"
+# 不要なら削除（デフォルト pipeline SA の anyuid と競合しうる）
+# oc delete rolebinding pipeline-anyuid pipeline-privileged -n "$NS" --ignore-not-found
 
 # PipelineRun の git-url / image を編集してから
 oc create -f tekton/pipelineruns/sample-app-ci-run.yaml
 ```
 
-`tekton/pipelineruns/sample-app-ci-run.yaml` の `git-url`・`image`・（任意）`docker-credentials` Secret を環境に合わせて変更してください。内部レジストリでは `tls-verify: "false"` の例を入れています。
+`image-build` は [Red Hat ドキュメント（非 root Buildah）](https://docs.redhat.com/ja/documentation/red_hat_openshift_pipelines/1.13/html/securing_openshift_pipelines/unprivileged-building-of-container-images-using-buildah) に沿い、**UID 1000（build ユーザー）**・専用 SA `pipelines-sa-build`・SCC `pipelines-scc-buildah-1000` で Tekton 内の buildah を実行します。`capabilities.add` は使わず、`allowPrivilegeEscalation: true` で SETUID/SETGID を有効にします。
 
-レジストリ認証がある場合:
+Quay へ push する場合:
 
 ```bash
-oc create secret docker-registry pipeline-push-secret \
-  --docker-server=image-registry.openshift-image-registry.svc:5000 \
-  --docker-username="$(oc whoami)" \
-  --docker-password="$(oc whoami -t)" \
+oc create secret docker-registry quay-push-secret \
+  --docker-server=quay.io \
+  --docker-username=YOUR_USER \
+  --docker-password=YOUR_TOKEN \
   -n "$NS"
-# PipelineRun の docker-credentials コメントを外して secretName を合わせる
+# PipelineRun の docker-credentials コメントを外す
 ```
 
 ### CI の見方
@@ -78,7 +82,9 @@ podman build -f ContainerFile -t sample-app:local .
 |------|------|
 | UT 失敗 | `tkn taskrun logs <unit-test-run> -n "$NS"` で Surefire を確認 |
 | Maven 依存の取得失敗 | クラスタから Maven Central へ出られるか、プロキシ設定 |
-| `buildah` / push 失敗 | `pipeline` SA にレジストリ push 権限・`docker-credentials` Secret・SCC（`anyuid` 等） |
+| `uid_map` / capabilities で Pod 拒否 | [RH 非 root Buildah](https://docs.redhat.com/ja/documentation/red_hat_openshift_pipelines/1.13/html/securing_openshift_pipelines/unprivileged-building-of-container-images-using-buildah) どおり `scc-pipelines-buildah-1000` + `pipelines-sa-build` を適用 |
+| イメージ push 失敗（Quay 等） | `quay-push-secret` を作成し PipelineRun の `docker-credentials` を有効化 |
+| `short-name resolution ... cannot prompt without a TTY` | `FROM` を `docker.io/library/...` の完全修飾名に（`ContainerFile` 参照）。Task 再適用後に git 取得からやり直す |
 | `fetch-repository` の ImagePullBackOff | `registry.redhat.io` は未認証だと pull 不可。既定は `docker.io/alpine/git`。**Task をクラスタに再適用**してから PipelineRun を再作成（`oc apply -f tekton/tasks/`） |
 | docker.io が禁止のクラスタ | Pipeline / PipelineRun の `git-image`・`maven-image` を社内ミラー URL に変更 |
 
