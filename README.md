@@ -1,5 +1,5 @@
 # sample-app-with-tekton
-
+test
 OpenShift 上で **Tekton** が CI（ソース取得 → コードビルド → UT → 静的スキャン → イメージビルド → イメージスキャン）を順に実行するデモ用リポジトリです。アプリは Maven で `target/sample.war` を生成し、`ContainerFile` で Tomcat イメージに載せます。
 
 ## 前提

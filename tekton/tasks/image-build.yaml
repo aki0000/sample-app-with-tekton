@@ -78,12 +78,13 @@ spec:
           echo "Push skipped"
           exit 0
         fi
+        DIGEST_FILE=/tmp/image-digest
         buildah --storage-driver="$(params.STORAGE_DRIVER)" push \
           --tls-verify="$(params.TLSVERIFY)" \
-          --digestfile "$(workspaces.source.path)/image-digest" \
+          --digestfile "$DIGEST_FILE" \
           "$(params.IMAGE)" \
           "docker://$(params.IMAGE)"
-        cat "$(workspaces.source.path)/image-digest"
+        cat "$DIGEST_FILE"
       volumeMounts:
         - name: varlibcontainers
           mountPath: /home/build/.local/share/containers
